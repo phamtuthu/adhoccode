@@ -89,7 +89,6 @@ def parse_datetime(val):
     s = str(val).strip()
     if s.lower() in ('', 'null', 'none', 'n/a'):
         return None
-    # Nếu có .000 thì bỏ đi
     if '.' in s:
         s = s.split('.')[0]
     match = re.match(r"^(\d{4}-\d{2}-\d{2}) (\d{1,2}):(\d{2}):(\d{2})$", s)
@@ -102,13 +101,6 @@ def parse_datetime(val):
         return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
     print(f"⚠️ DateTime sai định dạng: '{val}' -> set None")
     return None
-
-def get_vn_time_range(hours=2):
-    now_utc = datetime.now(timezone.utc)
-    now_vn = now_utc + timedelta(hours=7)
-    to_time = now_vn
-    from_time = to_time - timedelta(hours=hours)
-    return from_time.strftime('%Y-%m-%d %H:%M:%S'), to_time.strftime('%Y-%m-%d %H:%M:%S')
 
 def download_appsflyer_installs(from_time, to_time):
     url = (
@@ -129,7 +121,8 @@ def download_appsflyer_installs(from_time, to_time):
     return data
 
 def main():
-    from_time, to_time = get_vn_time_range(2)
+    from_time = "2025-05-01 00:00:00"
+    to_time   = "2025-05-31 23:59:59"
     print(f"🕒 Lấy AppsFlyer từ {from_time} đến {to_time} (Asia/Ho_Chi_Minh)")
     raw_data = download_appsflyer_installs(from_time, to_time)
     if not raw_data:
