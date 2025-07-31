@@ -121,8 +121,8 @@ def download_appsflyer_installs(from_time, to_time):
     return data
 
 def main():
-    from_time = "2025-05-01 00:00:00"
-    to_time   = "2025-05-31 23:59:59"
+    from_time = "2025-06-01 00:00:00"
+    to_time   = "2025-06-30 23:59:59"
     print(f"🕒 Lấy AppsFlyer từ {from_time} đến {to_time} (Asia/Ho_Chi_Minh)")
     raw_data = download_appsflyer_installs(from_time, to_time)
     if not raw_data:
