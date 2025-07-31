@@ -3,7 +3,7 @@ import requests
 import csv
 from io import StringIO
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from clickhouse_driver import Client
 
 APPSFLYER_TOKEN = os.environ.get('APPSFLYER_TOKEN')
@@ -45,7 +45,7 @@ APPSFLYER_TO_CH = {
     "Device Download Time": "device_download_time",
     "Device Model": "device_model",
     "Engagement Type": "engagement_type",
-    "Campaign ID": "campaignid", 
+    "Campaign ID": "campaignid",
 }
 ADDITIONAL_FIELDS = (
     'blocked_reason_rule,store_reinstall,impressions,contributor3_match_type,custom_dimension,conversion_type,'
@@ -108,73 +108,85 @@ def get_bundle_id(app_id):
         return "vn.ghn.app.shiip"
     return app_id
 
+def daterange(start_date, end_date):
+    for n in range((end_date - start_date).days + 1):
+        yield start_date + timedelta(n)
+
+def get_imported_days(client, table, start_date, end_date, bundle_id=None):
+    query = f"""
+        SELECT DISTINCT toDate(event_time) as event_date
+        FROM {table}
+        WHERE event_time >= '{start_date.strftime('%Y-%m-%d 00:00:00')}'
+          AND event_time <= '{end_date.strftime('%Y-%m-%d 23:59:59')}'
+    """
+    if bundle_id:
+        query += f" AND bundle_id = '{bundle_id}'"
+    rows = client.execute(query)
+    return set(row[0] for row in rows)
+
 def main():
-    # === Chọn khoảng thời gian muốn lấy theo event_time ===
-    from_time = "2025-06-01 00:00:00"
-    to_time   = "2025-06-30 23:59:59"
-    print(f"🕒 Lấy AppsFlyer events từ {from_time} đến {to_time} (Asia/Ho_Chi_Minh)")
-    
+    # ==== Chỉnh sửa ngày ở đây ====
+    start_date = datetime.strptime("2025-05-01", "%Y-%m-%d")
+    end_date   = datetime.strptime("2025-05-31", "%Y-%m-%d")
+    # ==============================
+
+    print(f"🕒 Check và import AppsFlyer events từng ngày từ {start_date.date()} đến {end_date.date()} (Asia/Ho_Chi_Minh)")
+
     client = Client(
         host=CH_HOST, port=CH_PORT, user=CH_USER, password=CH_PASSWORD, database=CH_DATABASE
     )
     appsflyer_cols = list(APPSFLYER_TO_CH.keys())
     ch_cols = list(APPSFLYER_TO_CH.values())
-    event_time_idx = ch_cols.index('event_time')
-    event_revenue_idx = ch_cols.index('event_revenue')
-
     total_inserted = 0
 
     for app_id in APP_IDS:
         app_id = app_id.strip()
         bundle_id = get_bundle_id(app_id)
         print(f"\n==== Processing APP_ID: {app_id} (bundle_id={bundle_id}) ====")
-        
-        # Lấy event_time lớn nhất đã có trong ClickHouse cho bundle_id này (optional, có thể bỏ nếu insert full)
-        # Nếu muốn tránh insert trùng, vẫn có thể giữ lại logic này.
-        # Nếu muốn insert all trong khoảng from_time → to_time thì bỏ phần filter max_event_time bên dưới.
-        # Nếu muốn lọc theo max_event_time: uncomment 3 dòng dưới đây.
-        # result = client.execute(
-        #     f"SELECT max(event_time) FROM {CH_TABLE} WHERE bundle_id='{bundle_id}'"
-        # )
-        # max_event_time = result[0][0] if result and result[0][0] else None
-        max_event_time = None
 
-        raw_data = download_appsflyer_events(app_id, from_time, to_time)
-        if not raw_data:
-            print(f"⚠️ Không có data AppsFlyer cho app {app_id} trong khoảng này.")
-            continue
+        imported_days = get_imported_days(client, CH_TABLE, start_date, end_date, bundle_id)
+        print(f"== Ngày đã có dữ liệu: {[str(x) for x in sorted(imported_days)]}")
 
-        mapped_data = []
-        for row in raw_data:
-            mapped_row = []
-            for i, (af_col, ch_col) in enumerate(zip(appsflyer_cols, ch_cols)):
-                val = row.get(af_col)
-                if ch_col in DATETIME_CH_COLS:
-                    dt_val = parse_datetime(val)
-                    mapped_row.append(dt_val)
-                elif ch_col == "event_revenue":
-                    mapped_row.append(parse_int_zero(val))
-                elif ch_col == "bundle_id":
-                    mapped_row.append(bundle_id)
-                else:
-                    mapped_row.append(val if val not in (None, "", "null", "None") else None)
-            # Chỉ lọc nếu dùng max_event_time. Mặc định insert full trong khoảng đã chọn.
-            if max_event_time:
-                if mapped_row[event_time_idx] and mapped_row[event_time_idx] <= max_event_time:
-                    continue  # skip old rows
-            mapped_data.append(mapped_row)
+        for single_date in daterange(start_date, end_date):
+            day_str = single_date.date().isoformat()
+            if single_date.date() in imported_days:
+                print(f"-- Đã có dữ liệu ngày {day_str}, bỏ qua.")
+                continue
 
-        print(f"➕ Số dòng mới sẽ insert: {len(mapped_data)}")
+            from_time = single_date.strftime("%Y-%m-%d 00:00:00")
+            to_time   = single_date.strftime("%Y-%m-%d 23:59:59")
+            print(f"\n-- Lấy data ngày: {day_str} (chưa có dữ liệu)")
+            raw_data = download_appsflyer_events(app_id, from_time, to_time)
+            if not raw_data:
+                print(f"⚠️ Không có data AppsFlyer cho app {app_id} ngày {day_str}.")
+                continue
 
-        if mapped_data:
-            client.execute(
-                f"INSERT INTO {CH_TABLE} ({', '.join(ch_cols)}) VALUES",
-                mapped_data
-            )
-            print(f"✅ Đã insert lên ClickHouse xong! ({len(mapped_data)} rows)")
-            total_inserted += len(mapped_data)
-        else:
-            print("Không có dòng mới để insert.")
+            mapped_data = []
+            for row in raw_data:
+                mapped_row = []
+                for i, (af_col, ch_col) in enumerate(zip(appsflyer_cols, ch_cols)):
+                    val = row.get(af_col)
+                    if ch_col in DATETIME_CH_COLS:
+                        dt_val = parse_datetime(val)
+                        mapped_row.append(dt_val)
+                    elif ch_col == "event_revenue":
+                        mapped_row.append(parse_int_zero(val))
+                    elif ch_col == "bundle_id":
+                        mapped_row.append(bundle_id)
+                    else:
+                        mapped_row.append(val if val not in (None, "", "null", "None") else None)
+                mapped_data.append(mapped_row)
+
+            print(f"➕ Số dòng mới sẽ insert ngày {day_str}: {len(mapped_data)}")
+            if mapped_data:
+                client.execute(
+                    f"INSERT INTO {CH_TABLE} ({', '.join(ch_cols)}) VALUES",
+                    mapped_data
+                )
+                print(f"✅ Đã insert lên ClickHouse xong! ({len(mapped_data)} rows)")
+                total_inserted += len(mapped_data)
+            else:
+                print("Không có dòng mới để insert.")
 
     client.disconnect()
     print(f"\n== Tổng số rows insert vào ClickHouse (cả {len(APP_IDS)} app): {total_inserted} ==")
