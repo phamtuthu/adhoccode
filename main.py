@@ -6,6 +6,7 @@ import re
 from datetime import datetime, timedelta
 from clickhouse_driver import Client
 
+# --- Config ---
 APPSFLYER_TOKEN = os.environ.get('APPSFLYER_TOKEN')
 APP_IDS = os.environ.get('APP_IDS', 'id1203171490,vn.ghn.app.giaohangnhanh').split(',')
 CH_HOST = os.environ.get('CH_HOST')
@@ -130,7 +131,7 @@ def main():
     end_date   = datetime.strptime("2025-05-31", "%Y-%m-%d")
     # ==============================
 
-    print(f"🕒 Check và import AppsFlyer events từng ngày từ {start_date.date()} đến {end_date.date()} (Asia/Ho_Chi_Minh)")
+    print(f"🕒 Import AppsFlyer events từng ngày từ {start_date.date()} đến {end_date.date()} (Asia/Ho_Chi_Minh)")
 
     client = Client(
         host=CH_HOST, port=CH_PORT, user=CH_USER, password=CH_PASSWORD, database=CH_DATABASE
@@ -143,7 +144,6 @@ def main():
         app_id = app_id.strip()
         bundle_id = get_bundle_id(app_id)
         print(f"\n==== Processing APP_ID: {app_id} (bundle_id={bundle_id}) ====")
-
         imported_days = get_imported_days(client, CH_TABLE, start_date, end_date, bundle_id)
         print(f"== Ngày đã có dữ liệu: {[str(x) for x in sorted(imported_days)]}")
 
@@ -155,7 +155,7 @@ def main():
 
             from_time = single_date.strftime("%Y-%m-%d 00:00:00")
             to_time   = single_date.strftime("%Y-%m-%d 23:59:59")
-            print(f"\n-- Lấy data ngày: {day_str} (chưa có dữ liệu)")
+            print(f"\n-- Đang import ngày: {day_str}")
             raw_data = download_appsflyer_events(app_id, from_time, to_time)
             if not raw_data:
                 print(f"⚠️ Không có data AppsFlyer cho app {app_id} ngày {day_str}.")
@@ -177,19 +177,19 @@ def main():
                         mapped_row.append(val if val not in (None, "", "null", "None") else None)
                 mapped_data.append(mapped_row)
 
-            print(f"➕ Số dòng mới sẽ insert ngày {day_str}: {len(mapped_data)}")
+            print(f"➕ Insert {len(mapped_data)} rows for ngày {day_str}")
             if mapped_data:
                 client.execute(
                     f"INSERT INTO {CH_TABLE} ({', '.join(ch_cols)}) VALUES",
                     mapped_data
                 )
-                print(f"✅ Đã insert lên ClickHouse xong! ({len(mapped_data)} rows)")
+                print(f"✅ Đã insert {len(mapped_data)} rows cho ngày {day_str}")
                 total_inserted += len(mapped_data)
             else:
                 print("Không có dòng mới để insert.")
 
     client.disconnect()
-    print(f"\n== Tổng số rows insert vào ClickHouse (cả {len(APP_IDS)} app): {total_inserted} ==")
+    print(f"\n== Tổng số rows import vào ClickHouse (cả {len(APP_IDS)} app): {total_inserted} ==")
 
 if __name__ == "__main__":
     main()
