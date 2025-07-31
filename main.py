@@ -128,7 +128,7 @@ def get_imported_days(client, table, start_date, end_date, bundle_id=None):
 def main():
     # ==== Chỉnh sửa ngày ở đây ====
     start_date = datetime.strptime("2025-05-01", "%Y-%m-%d")
-    end_date   = datetime.strptime("2025-05-31", "%Y-%m-%d")
+    end_date   = datetime.strptime("2025-05-10", "%Y-%m-%d")
     # ==============================
 
     print(f"🕒 Import AppsFlyer events từng ngày từ {start_date.date()} đến {end_date.date()} (Asia/Ho_Chi_Minh)")
